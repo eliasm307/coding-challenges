@@ -1,0 +1,6 @@
+{
+  "extends": "@eliasm307/config/typescript/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  }
+}

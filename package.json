@@ -1,0 +1,36 @@
+{
+  "name": "coding-challenges",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "keywords": [],
+  "author": "",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "upgrade": "yarn upgrade-interactive && npm i --ignore-scripts",
+    "lint": "eslint --report-unused-disable-directives --ignore-path .gitignore --quiet --ext .jsx,.js,.ts,.tsx --cache --fix .",
+    "format": "prettier --write --ignore-path .gitignore .",
+    "formatlint": "npm run format && npm run lint",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run formatlint"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eliasm307/coding-challenges.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eliasm307/coding-challenges/issues"
+  },
+  "homepage": "https://github.com/eliasm307/coding-challenges#readme",
+  "devDependencies": {
+    "@eliasm307/config": "^0.44.4",
+    "@types/node": "^18.18.9",
+    "@typescript-eslint/eslint-plugin": "^6.10.0",
+    "@typescript-eslint/parser": "^6.10.0",
+    "eslint": "^8.53.0",
+    "prettier": "^3.0.3",
+    "typescript": "^5.2.2",
+    "vitest": "^0.34.6"
+  }
+}
