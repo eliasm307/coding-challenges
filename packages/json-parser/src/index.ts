@@ -1,16 +1,23 @@
-export default function parseJSON(json: string): any {
-  console.log("parseJSON with unicode translated", json);
-  const tokenIterator = createTokenIterator(json);
-  const value = parseTokens(tokenIterator);
+export default function parseJSON(text: string): any {
+  const tokenIterator = createTokenIterator(text);
+  const value = parseTokens({ context: { depthIndex: 0, tokenIterator } });
   if (!tokenIterator.next().done) {
     throw new Error(`Unexpected tokens after end of value`);
   }
   if (!value || (typeof value !== "object" && !Array.isArray(value))) {
-    throw new Error(`Expected overall object or array but got: "${value}"`);
+    throw new Error(`Expected top level object or array but got: "${value}"`);
   }
   return value;
 }
 
+/**
+ * The depth is arbitrary, but we need to set a limit to pass the standard tests
+ *
+ * @see https://stackoverflow.com/questions/42116718/is-there-an-array-depth-limitation-in-json
+ */
+const MAX_DEPTH_INDEX = 19; // 0 based index
+
+// We use a symbol to identify special tokens so we can differentiate them from parsed values
 const SpecialTokenSymbol = Symbol("SpecialToken");
 
 type Token =
@@ -27,157 +34,155 @@ type SpecialToken = "{" | "}" | "[" | "]" | ":" | ",";
 type TokenIterator = Generator<Token, void, unknown>;
 type TokenItem = IteratorResult<Token, void>;
 
-// todo have these as strings and use `#contains`? is that faster?
-const SPECIAL_CHARACTER_TOKENS = new Set(["{", "}", "[", "]", ":", ","]);
-const IRRELEVANT_TOKENS = new Set([" ", "\n", "\t"]); // ignore white space
+type ParserContext = {
+  /**
+   * Where the top level is 0, and each nested object or array increments the depth
+   */
+  depthIndex: number;
+  tokenIterator: TokenIterator;
+};
+
+const SPECIAL_CHARACTER_TOKENS = "{}[]:,";
+const WHITE_SPACE_TOKENS = " \n\t";
 
 // NOTE: using a generator so we can lazy parse the string and if there is an issue we can stop early
-function* createTokenIterator(json: string): TokenIterator {
-  let i = 0;
+function* createTokenIterator(text: string): TokenIterator {
+  let charIndex = 0;
   let token: Token;
-  while (i < json.length) {
-    // handle white space
-    if (IRRELEVANT_TOKENS.has(json[i])) {
-      // console.log(i, "createTokenIterator skipping:", json[i]);
-      i++;
+  while (charIndex < text.length) {
+    if (WHITE_SPACE_TOKENS.includes(text[charIndex])) {
+      charIndex++; // ignore white space
       continue;
     }
 
     // handle special characters
-    if (SPECIAL_CHARACTER_TOKENS.has(json[i])) {
+    if (SPECIAL_CHARACTER_TOKENS.includes(text[charIndex])) {
       token = {
         type: SpecialTokenSymbol,
-        value: json[i] as SpecialToken,
+        value: text[charIndex] as SpecialToken,
       };
-      console.log(i, "createTokenIterator yielding:", token);
       yield token;
-      i++;
+      charIndex++; // the current char is the special character, so we get the next char for the next iteration
       continue;
     }
 
     // handle strings in quotes
-    if (json[i] === '"') {
+    if (text[charIndex] === '"') {
       token = "";
-
-      // parse string
-      while (json[++i] !== '"') {
+      // parse string until we hit the closing quote
+      while (text[++charIndex] !== '"') {
         // handle new lines
-        if (json[i] === "\n") {
+        if (text[charIndex] === "\n") {
           throw new Error(`Unexpected new line in string`);
         }
 
         // handle tabs
-        if (json[i] === "\t") {
+        if (text[charIndex] === "\t") {
           throw new Error(`Unexpected tab in string`);
         }
 
         // handle escape characters
-        if (json[i] === "\\") {
-          i++; // current char is the escape character, so we skip it
+        if (text[charIndex] === "\\") {
+          charIndex++; // current char is the escape character, so we skip it
 
-          if ("x0 \n".includes(json[i])) {
-            throw new Error(`Illegal escape character: ${json[i]}`);
+          // NOTE: not sure why these are illegal, but they are in the standard tests
+          if ("x0 \n".includes(text[charIndex])) {
+            throw new Error(`Illegal escape character: ${text[charIndex]}`);
           }
 
           // handle unicode escape characters
-          if (json[i] === "u") {
+          if (text[charIndex] === "u") {
             let unicode = "";
             for (let j = 0; j < 4; j++) {
-              unicode += json[++i];
+              unicode += text[++charIndex];
             }
-            console.log(
-              i,
-              "createTokenIterator adding unicode:",
-              unicode,
-              ", to string token:",
-              token,
-            );
             token += String.fromCharCode(parseInt(unicode, 16));
             continue;
+          }
 
-            // handle special escape characters
-          } else if ("bfnrt".includes(json[i])) {
-            if (json[i] === "b") {
+          // handle special escape characters
+          switch (text[charIndex]) {
+            case "b":
               token += "\b";
-            } else if (json[i] === "f") {
+              continue;
+            case "f":
               token += "\f";
-            } else if (json[i] === "n") {
+              continue;
+            case "n":
               token += "\n";
-            } else if (json[i] === "r") {
+              continue;
+            case "r":
               token += "\r";
-            } else if (json[i] === "t") {
+              continue;
+            case "t":
               token += "\t";
-            }
-            continue;
+              continue;
           }
         }
 
         // handle normal characters
-        token += json[i];
+        token += text[charIndex];
       }
-      if (json[i] !== '"') {
+      if (text[charIndex] !== '"') {
         // e.g. if we hit the end of the string without a closing quote
         throw new Error(`Unexpected end of string`);
       }
 
-      console.log(i, "createTokenIterator yielding:", token);
       yield token;
-      // the current char is the closing quote, so we skip it
-      i++;
+      charIndex++; // the current char is the closing quote, so we get the next char for the next iteration
       continue;
     }
 
     // handle numbers
-    if (isNumericCharacter(json[i]) || json[i] === "-") {
-      if (json[i] === "0" && "0123456789".includes(json[i + 1])) {
+    if (isNumericCharacter(text[charIndex]) || text[charIndex] === "-") {
+      if (text[charIndex] === "0" && "0123456789".includes(text[charIndex + 1])) {
         throw new Error(`Unexpected leading zero in number`);
       }
-      token = json[i];
-      while (isNumericCharacter(json[++i])) {
-        token += json[i];
+      token = text[charIndex];
+      while (isNumericCharacter(text[++charIndex])) {
+        token += text[charIndex];
       }
       token = Number(token);
       if (isNaN(token)) {
         throw new Error(`Malformed number: ${token}`);
       }
-      console.log(i, "createTokenIterator yielding:", token);
       yield token;
+      // current char is the first non numeric character, so we keep it for the next iteration
       continue;
     }
 
     // handle key words
-    if (isAlphabeticalCharacter(json[i])) {
-      let token = json[i];
-      while (isAlphabeticalCharacter(json[++i])) {
-        token += json[i];
+    if (isAlphabeticalCharacter(text[charIndex])) {
+      let token = text[charIndex];
+      while (isAlphabeticalCharacter(text[++charIndex])) {
+        token += text[charIndex];
       }
+      // current char is the first non alphabetical character, so we keep it for the next iteration
       if (token === "true") {
-        console.log(i, "createTokenIterator yielding:", true);
         yield true;
         continue;
       }
       if (token === "false") {
-        console.log(i, "createTokenIterator yielding:", false);
         yield false;
         continue;
       }
       if (token === "null") {
-        console.log(i, "createTokenIterator yielding:", null);
         yield null;
         continue;
       }
       throw new Error(`Unexpected key word: ${token}`);
     }
 
-    throw new Error(`Unexpected character: ${json[i]}`);
+    throw new Error(`Unexpected character: ${text[charIndex]}`);
   }
 }
 
 function isAlphabeticalCharacter(char: string): boolean {
+  // only alphabetical characters have a different upper and lower case
   return char.toLowerCase() !== char.toUpperCase();
 }
 
-const NUMBER_TOKENS = new Set("0123456789.eE-+".split(""));
+const NUMBER_VALUE_TOKENS = "0123456789.eE-+";
 /**
  * Predicate for characters that can be in a valid number
  *
@@ -188,23 +193,29 @@ const NUMBER_TOKENS = new Set("0123456789.eE-+".split(""));
  * 1.234567890E+34 // scientific notation
  */
 function isNumericCharacter(char: string): boolean {
-  return NUMBER_TOKENS.has(char);
+  return NUMBER_VALUE_TOKENS.includes(char);
 }
 
 /**
  * Parses tokens into a JSON value
  */
-function parseTokens(tokenIterator: TokenIterator, currentTokenItem?: TokenItem): any {
-  const tokenItem = currentTokenItem || tokenIterator.next();
+function parseTokens({
+  context,
+  currentTokenItem,
+}: {
+  context: ParserContext;
+  currentTokenItem?: TokenItem;
+}): any {
+  const tokenItem = currentTokenItem || context.tokenIterator.next();
   if (tokenItem.done) {
     throw new Error(`Unexpected end of tokens`);
   }
 
   if (isSpecialTokenWithValue(tokenItem.value, "{")) {
-    return parseObjectBody(tokenIterator);
+    return parseObjectBody({ ...context, depthIndex: context.depthIndex + 1 });
   }
   if (isSpecialTokenWithValue(tokenItem.value, "[")) {
-    return parseArrayBody(tokenIterator);
+    return parseArrayBody({ ...context, depthIndex: context.depthIndex + 1 });
   }
   if (isSpecialToken(tokenItem.value)) {
     throw new Error(`Unexpected special token: ${tokenItem.value.value}`);
@@ -216,10 +227,14 @@ function parseTokens(tokenIterator: TokenIterator, currentTokenItem?: TokenItem)
 /**
  * Parses the tokens for an object body, starting after the opening "{"
  */
-function parseObjectBody(tokenIterator: TokenIterator): Record<string, Token> {
+function parseObjectBody(context: ParserContext): Record<string, Token> {
+  if (context.depthIndex > MAX_DEPTH_INDEX) {
+    throw new Error(`Max depth exceeded`);
+  }
+
   const properties: Record<string, Token> = {};
   // get expected key
-  let keyTokenItem = tokenIterator.next();
+  let keyTokenItem = context.tokenIterator.next();
   while (!isSpecialTokenWithValue(keyTokenItem.value, "}")) {
     if (keyTokenItem.done) {
       throw new Error(`Unexpected end of object tokens`);
@@ -231,7 +246,7 @@ function parseObjectBody(tokenIterator: TokenIterator): Record<string, Token> {
     }
 
     // get expected colon
-    const colonTokenItem = tokenIterator.next();
+    const colonTokenItem = context.tokenIterator.next();
     if (colonTokenItem.done) {
       throw new Error(`Unexpected end of object tokens`);
     }
@@ -240,10 +255,10 @@ function parseObjectBody(tokenIterator: TokenIterator): Record<string, Token> {
     }
 
     // add to properties
-    properties[keyTokenItem.value] = parseTokens(tokenIterator);
+    properties[keyTokenItem.value] = parseTokens({ context });
 
     // get expected comma or closing brace
-    const commaTokenItem = tokenIterator.next();
+    const commaTokenItem = context.tokenIterator.next();
     if (commaTokenItem.done) {
       throw new Error(`Unexpected end of object tokens`);
     }
@@ -252,7 +267,7 @@ function parseObjectBody(tokenIterator: TokenIterator): Record<string, Token> {
     }
     if (isSpecialTokenWithValue(commaTokenItem.value, ",")) {
       // get next property key token
-      keyTokenItem = tokenIterator.next();
+      keyTokenItem = context.tokenIterator.next();
       if (isSpecialTokenWithValue(keyTokenItem.value, "}")) {
         throw new Error(`Unexpected trailing comma in object`);
       }
@@ -266,30 +281,35 @@ function parseObjectBody(tokenIterator: TokenIterator): Record<string, Token> {
 /**
  * Parses the tokens for an array body, starting after the opening "["
  */
-function parseArrayBody(tokenIterator: TokenIterator): Token[] {
+function parseArrayBody(context: ParserContext): Token[] {
+  if (context.depthIndex > MAX_DEPTH_INDEX) {
+    throw new Error(`Max depth exceeded`);
+  }
+
   const values: Token[] = [];
-  let tokenItem = tokenIterator.next();
-  while (!isSpecialTokenWithValue(tokenItem.value, "]")) {
-    if (tokenItem.done) {
+  let currentTokenItem = context.tokenIterator.next();
+  while (!isSpecialTokenWithValue(currentTokenItem.value, "]")) {
+    if (currentTokenItem.done) {
       throw new Error(`Unexpected end of array tokens`);
     }
-    const value = parseTokens(tokenIterator, tokenItem);
-    values.push(value);
-    tokenItem = tokenIterator.next();
-    if (tokenItem.done) {
+    values.push(parseTokens({ context, currentTokenItem: currentTokenItem }));
+
+    // check next token
+    currentTokenItem = context.tokenIterator.next();
+    if (currentTokenItem.done) {
       throw new Error(`Unexpected end of array tokens`);
     }
-    if (isSpecialTokenWithValue(tokenItem.value, "]")) {
+    if (isSpecialTokenWithValue(currentTokenItem.value, "]")) {
       break; // end of array
     }
-    if (isSpecialTokenWithValue(tokenItem.value, ",")) {
-      tokenItem = tokenIterator.next(); // get next value
-      if (isSpecialTokenWithValue(tokenItem.value, "]")) {
+    if (isSpecialTokenWithValue(currentTokenItem.value, ",")) {
+      currentTokenItem = context.tokenIterator.next(); // get next value
+      if (isSpecialTokenWithValue(currentTokenItem.value, "]")) {
         throw new Error(`Unexpected trailing comma in array`);
       }
       continue;
     }
-    throw new Error(`Expected "," or "]" but got: "${JSON.stringify(tokenItem.value)}"`);
+    throw new Error(`Expected "," or "]" but got: "${JSON.stringify(currentTokenItem.value)}"`);
   }
   return values;
 }
