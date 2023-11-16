@@ -24,6 +24,9 @@ type TokenItem = IteratorResult<Token, void>;
 
 const SPECIAL_CHARACTER_TOKENS = "{}[]:,";
 const WHITE_SPACE_TOKENS = " \n\t";
+// NOTE: not sure why these are illegal, but they are in the standard tests
+const ILLEGAL_ESCAPE_CHARS = "x0 \n";
+const NUMBERS = "0123456789";
 
 /**
  * Characters that can be in a valid number value
@@ -73,8 +76,7 @@ function* createTokenIterator(text: string): TokenIterator {
         if (text[charIndex] === "\\") {
           charIndex++; // current char is the escape character, so we skip it
 
-          // NOTE: not sure why these are illegal, but they are in the standard tests
-          if ("x0 \n".includes(text[charIndex])) {
+          if (ILLEGAL_ESCAPE_CHARS.includes(text[charIndex])) {
             throw new Error(`Illegal escape character: ${text[charIndex]}`);
           }
 
@@ -123,7 +125,7 @@ function* createTokenIterator(text: string): TokenIterator {
 
     // handle numbers
     if (NUMBER_VALUE_TOKENS.includes(text[charIndex]) || text[charIndex] === "-") {
-      if (text[charIndex] === "0" && "0123456789".includes(text[charIndex + 1])) {
+      if (text[charIndex] === "0" && NUMBERS.includes(text[charIndex + 1])) {
         throw new Error(`Unexpected leading zero in number`);
       }
       token = text[charIndex];
@@ -132,7 +134,7 @@ function* createTokenIterator(text: string): TokenIterator {
       }
       token = Number(token);
       if (isNaN(token)) {
-        throw new Error(`Malformed number: ${token}`);
+        throw new Error(`Malformed number`);
       }
       yield token;
       // current char is the first non numeric character, so we keep it for the next iteration
