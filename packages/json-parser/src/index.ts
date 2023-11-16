@@ -1,6 +1,6 @@
 export default function parseJSON(text: string): any {
   const tokenIterator = createTokenIterator(text);
-  const value = parseTokens({ context: { depthIndex: 0, tokenIterator } });
+  const value = parseTokens(tokenIterator, 0);
   if (!tokenIterator.next().done) {
     throw new Error(`Unexpected tokens after end of value`);
   }
@@ -17,33 +17,24 @@ export default function parseJSON(text: string): any {
  */
 const MAX_DEPTH_INDEX = 19; // 0 based index
 
-// We use a symbol to identify special tokens so we can differentiate them from parsed values
-const SpecialTokenSymbol = Symbol("SpecialToken");
+type Token = string | number | boolean | null;
 
-type Token =
-  | {
-      type: typeof SpecialTokenSymbol;
-      value: SpecialToken;
-    }
-  | string
-  | number
-  | boolean
-  | null;
-
-type SpecialToken = "{" | "}" | "[" | "]" | ":" | ",";
 type TokenIterator = Generator<Token, void, unknown>;
 type TokenItem = IteratorResult<Token, void>;
 
-type ParserContext = {
-  /**
-   * Where the top level is 0, and each nested object or array increments the depth
-   */
-  depthIndex: number;
-  tokenIterator: TokenIterator;
-};
-
 const SPECIAL_CHARACTER_TOKENS = "{}[]:,";
 const WHITE_SPACE_TOKENS = " \n\t";
+
+/**
+ * Characters that can be in a valid number value
+ *
+ * @example
+ * 1234567890 // positive integer
+ * -9876.543210 // negative floating point
+ * 0.123456789e-12 // scientific notation
+ * 1.234567890E+34 // scientific notation
+ */
+const NUMBER_VALUE_TOKENS = "0123456789.eE-+";
 
 // NOTE: using a generator so we can lazy parse the string and if there is an issue we can stop early
 function* createTokenIterator(text: string): TokenIterator {
@@ -57,10 +48,7 @@ function* createTokenIterator(text: string): TokenIterator {
 
     // handle special characters
     if (SPECIAL_CHARACTER_TOKENS.includes(text[charIndex])) {
-      token = {
-        type: SpecialTokenSymbol,
-        value: text[charIndex] as SpecialToken,
-      };
+      token = text[charIndex];
       yield token;
       charIndex++; // the current char is the special character, so we get the next char for the next iteration
       continue;
@@ -134,12 +122,12 @@ function* createTokenIterator(text: string): TokenIterator {
     }
 
     // handle numbers
-    if (isNumericCharacter(text[charIndex]) || text[charIndex] === "-") {
+    if (NUMBER_VALUE_TOKENS.includes(text[charIndex]) || text[charIndex] === "-") {
       if (text[charIndex] === "0" && "0123456789".includes(text[charIndex + 1])) {
         throw new Error(`Unexpected leading zero in number`);
       }
       token = text[charIndex];
-      while (isNumericCharacter(text[++charIndex])) {
+      while (NUMBER_VALUE_TOKENS.includes(text[++charIndex])) {
         token += text[charIndex];
       }
       token = Number(token);
@@ -182,43 +170,27 @@ function isAlphabeticalCharacter(char: string): boolean {
   return char.toLowerCase() !== char.toUpperCase();
 }
 
-const NUMBER_VALUE_TOKENS = "0123456789.eE-+";
-/**
- * Predicate for characters that can be in a valid number
- *
- * @example
- * 1234567890 // positive integer
- * -9876.543210 // negative floating point
- * 0.123456789e-12 // scientific notation
- * 1.234567890E+34 // scientific notation
- */
-function isNumericCharacter(char: string): boolean {
-  return NUMBER_VALUE_TOKENS.includes(char);
-}
-
 /**
  * Parses tokens into a JSON value
  */
-function parseTokens({
-  context,
-  currentTokenItem,
-}: {
-  context: ParserContext;
-  currentTokenItem?: TokenItem;
-}): any {
-  const tokenItem = currentTokenItem || context.tokenIterator.next();
+function parseTokens(
+  tokenIterator: TokenIterator,
+  depthIndex: number,
+  currentTokenItem?: TokenItem,
+): any {
+  const tokenItem = currentTokenItem || tokenIterator.next();
   if (tokenItem.done) {
     throw new Error(`Unexpected end of tokens`);
   }
 
-  if (isSpecialTokenWithValue(tokenItem.value, "{")) {
-    return parseObjectBody({ ...context, depthIndex: context.depthIndex + 1 });
+  if (tokenItem.value === "{") {
+    return parseObjectBody(tokenIterator, depthIndex + 1);
   }
-  if (isSpecialTokenWithValue(tokenItem.value, "[")) {
-    return parseArrayBody({ ...context, depthIndex: context.depthIndex + 1 });
+  if (tokenItem.value === "[") {
+    return parseArrayBody(tokenIterator, depthIndex + 1);
   }
-  if (isSpecialToken(tokenItem.value)) {
-    throw new Error(`Unexpected special token: ${tokenItem.value.value}`);
+  if (SPECIAL_CHARACTER_TOKENS.includes(tokenItem.value as string)) {
+    throw new Error(`Unexpected special token: ${tokenItem.value}`);
   }
 
   return tokenItem.value;
@@ -227,15 +199,16 @@ function parseTokens({
 /**
  * Parses the tokens for an object body, starting after the opening "{"
  */
-function parseObjectBody(context: ParserContext): Record<string, Token> {
-  if (context.depthIndex > MAX_DEPTH_INDEX) {
+function parseObjectBody(tokenIterator: TokenIterator, depthIndex: number): Record<string, Token> {
+  if (depthIndex > MAX_DEPTH_INDEX) {
     throw new Error(`Max depth exceeded`);
   }
 
-  const properties: Record<string, Token> = {};
+  const object: Record<string, Token> = {};
+
   // get expected key
-  let keyTokenItem = context.tokenIterator.next();
-  while (!isSpecialTokenWithValue(keyTokenItem.value, "}")) {
+  let keyTokenItem = tokenIterator.next();
+  while (keyTokenItem.value !== "}") {
     if (keyTokenItem.done) {
       throw new Error(`Unexpected end of object tokens`);
     }
@@ -246,65 +219,66 @@ function parseObjectBody(context: ParserContext): Record<string, Token> {
     }
 
     // get expected colon
-    const colonTokenItem = context.tokenIterator.next();
+    const colonTokenItem = tokenIterator.next();
     if (colonTokenItem.done) {
       throw new Error(`Unexpected end of object tokens`);
     }
-    if (!isSpecialTokenWithValue(colonTokenItem.value, ":")) {
+    if (colonTokenItem.value !== ":") {
       throw new Error(`Expected ":" but got: "${JSON.stringify(colonTokenItem.value)}"`);
     }
 
     // add to properties
-    properties[keyTokenItem.value] = parseTokens({ context });
+    object[keyTokenItem.value] = parseTokens(tokenIterator, depthIndex);
 
     // get expected comma or closing brace
-    const commaTokenItem = context.tokenIterator.next();
+    const commaTokenItem = tokenIterator.next();
     if (commaTokenItem.done) {
       throw new Error(`Unexpected end of object tokens`);
     }
-    if (isSpecialTokenWithValue(commaTokenItem.value, "}")) {
+    if (commaTokenItem.value === "}") {
       break; // end of object
     }
-    if (isSpecialTokenWithValue(commaTokenItem.value, ",")) {
+    if (commaTokenItem.value === ",") {
       // get next property key token
-      keyTokenItem = context.tokenIterator.next();
-      if (isSpecialTokenWithValue(keyTokenItem.value, "}")) {
+      keyTokenItem = tokenIterator.next();
+      if (keyTokenItem.value === "}") {
         throw new Error(`Unexpected trailing comma in object`);
       }
       continue;
     }
     throw new Error(`Expected "," or "}" but got: "${JSON.stringify(commaTokenItem.value)}"`);
   }
-  return properties;
+
+  return object;
 }
 
 /**
  * Parses the tokens for an array body, starting after the opening "["
  */
-function parseArrayBody(context: ParserContext): Token[] {
-  if (context.depthIndex > MAX_DEPTH_INDEX) {
+function parseArrayBody(tokenIterator: TokenIterator, depthIndex: number): Token[] {
+  if (depthIndex > MAX_DEPTH_INDEX) {
     throw new Error(`Max depth exceeded`);
   }
 
   const values: Token[] = [];
-  let currentTokenItem = context.tokenIterator.next();
-  while (!isSpecialTokenWithValue(currentTokenItem.value, "]")) {
+  let currentTokenItem = tokenIterator.next();
+  while (currentTokenItem.value !== "]") {
     if (currentTokenItem.done) {
       throw new Error(`Unexpected end of array tokens`);
     }
-    values.push(parseTokens({ context, currentTokenItem: currentTokenItem }));
+    values.push(parseTokens(tokenIterator, depthIndex, currentTokenItem));
 
     // check next token
-    currentTokenItem = context.tokenIterator.next();
+    currentTokenItem = tokenIterator.next();
     if (currentTokenItem.done) {
       throw new Error(`Unexpected end of array tokens`);
     }
-    if (isSpecialTokenWithValue(currentTokenItem.value, "]")) {
+    if (currentTokenItem.value === "]") {
       break; // end of array
     }
-    if (isSpecialTokenWithValue(currentTokenItem.value, ",")) {
-      currentTokenItem = context.tokenIterator.next(); // get next value
-      if (isSpecialTokenWithValue(currentTokenItem.value, "]")) {
+    if (currentTokenItem.value === ",") {
+      currentTokenItem = tokenIterator.next(); // get next value
+      if (currentTokenItem.value === "]") {
         throw new Error(`Unexpected trailing comma in array`);
       }
       continue;
@@ -312,17 +286,4 @@ function parseArrayBody(context: ParserContext): Token[] {
     throw new Error(`Expected "," or "]" but got: "${JSON.stringify(currentTokenItem.value)}"`);
   }
   return values;
-}
-
-function isSpecialTokenWithValue<Value extends SpecialToken>(
-  token: Token | void,
-  test: Value,
-): token is { type: typeof SpecialTokenSymbol; value: Value } {
-  return isSpecialToken(token) && token?.value === test;
-}
-
-function isSpecialToken(
-  token: Token | void,
-): token is { type: typeof SpecialTokenSymbol; value: SpecialToken } {
-  return typeof token === "object" && token?.type === SpecialTokenSymbol;
 }
