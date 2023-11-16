@@ -6,8 +6,8 @@ import path from "node:path";
 describe("json-parser", () => {
   function test(parsedValue: any, options?: { only?: boolean }) {
     const jsonString = JSON.stringify(parsedValue);
-    const itFunction = options?.only ? it.only : it;
-    itFunction(`can parse - ${jsonString}`, () => {
+    const testIt = options?.only ? it.only : it;
+    testIt(`can parse - ${jsonString}`, () => {
       expect(parseJSON(jsonString)).toEqual(parsedValue);
     });
   }
