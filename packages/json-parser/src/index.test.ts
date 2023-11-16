@@ -1,8 +1,62 @@
 import { describe, expect, it } from "vitest";
 import parseJSON from ".";
+import fs from "node:fs";
+import path from "node:path";
 
 describe("json-parser", () => {
-  it("can parse {}", () => {
-    expect(parseJSON("{}")).toEqual({});
+  function test(parsedValue: any, options?: { only?: boolean }) {
+    const jsonString = JSON.stringify(parsedValue);
+    const itFunction = options?.only ? it.only : it;
+    itFunction(`can parse - ${jsonString}`, () => {
+      expect(parseJSON(jsonString)).toEqual(parsedValue);
+    });
+  }
+
+  test({});
+
+  test({ key: "value" });
+
+  test({
+    key1: true,
+    key2: false,
+    key3: null,
+    key4: "value",
+    key5: 101,
+  });
+
+  test({
+    key: "value",
+    "key-n": 101,
+    "key-o": {},
+    "key-l": [],
+  });
+
+  test([["foo"]]);
+
+  test([{ key: ["element"] }, {}]);
+
+  describe("standard tests", () => {
+    const standardTestsDir = path.join(__dirname, "../standard-test-data");
+    const fileNames = fs.readdirSync(standardTestsDir);
+
+    it("has files", () => {
+      console.log("found files", fileNames);
+      expect(fileNames.length).toBeGreaterThan(0);
+    });
+
+    fileNames.forEach((fileName) => {
+      const filePath = path.join(standardTestsDir, fileName);
+      const fileContents = fs.readFileSync(filePath, "utf8");
+
+      if (fileName.startsWith("fail")) {
+        it(`can fail to parse file "${fileName}": ${fileContents}`, () => {
+          expect(() => parseJSON(fileContents)).toThrow();
+        });
+      } else {
+        it(`can parse file "${fileName}": ${fileContents}`, () => {
+          expect(parseJSON(fileContents)).toEqual(JSON.parse(fileContents));
+        });
+      }
+    });
   });
 });
