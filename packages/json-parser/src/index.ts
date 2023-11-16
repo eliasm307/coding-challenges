@@ -1,4 +1,5 @@
 export default function parseJSON(json: string): any {
+  console.log("parseJSON with unicode translated", json);
   const tokenIterator = createTokenIterator(json);
   debugger;
   return parseTokens(tokenIterator);
@@ -51,15 +52,57 @@ function* createTokenIterator(json: string): TokenIterator {
     // handle strings in quotes
     if (json[i] === '"') {
       token = "";
+
+      // parse string
       while (json[++i] !== '"') {
+        // handle new lines in strings
+        if (json[i] === "\n") {
+          throw new Error(`Unexpected new line in string`);
+        }
+
+        // handle escape characters
+        if (json[i] === "\\") {
+          i++; // current char is the escape character, so we skip it
+
+          // handle unicode escape characters
+          if (json[i] === "u") {
+            let unicode = "";
+            for (let j = 0; j < 4; j++) {
+              unicode += json[++i];
+            }
+            console.log(
+              i,
+              "createTokenIterator adding unicode:",
+              unicode,
+              ", to string token:",
+              token,
+            );
+            token += String.fromCharCode(parseInt(unicode, 16));
+            continue;
+
+            // handle special escape characters
+          } else if ("bfnrt".includes(json[i])) {
+            if (json[i] === "b") {
+              token += "\b";
+            } else if (json[i] === "f") {
+              token += "\f";
+            } else if (json[i] === "n") {
+              token += "\n";
+            } else if (json[i] === "r") {
+              token += "\r";
+            } else if (json[i] === "t") {
+              token += "\t";
+            }
+            continue;
+          }
+        }
+
+        // handle normal characters
         token += json[i];
       }
       if (json[i] !== '"') {
         // e.g. if we hit the end of the string without a closing quote
         throw new Error(`Unexpected end of string`);
-      }
-      if (token.includes("\n")) {
-        throw new Error(`Unexpected new line in string`);
       }
 
       console.log(i, "createTokenIterator yielding:", token);
@@ -71,6 +114,9 @@ function* createTokenIterator(json: string): TokenIterator {
 
     // handle numbers
     if (isNumericCharacter(json[i]) || json[i] === "-") {
+      if (json[i] === "0" && "0123456789".includes(json[i + 1])) {
+        throw new Error(`Unexpected leading zero in number`);
+      }
       token = json[i];
       while (isNumericCharacter(json[++i])) {
         token += json[i];

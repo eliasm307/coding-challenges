@@ -33,7 +33,8 @@ describe("json-parser", () => {
 
   test([["foo"]]);
 
-  test([{ key: ["element"] }, {}]);
+  // eslint-disable-next-line
+  test({ key: `\"` });
 
   describe("standard tests", () => {
     const standardTestsDir = path.join(__dirname, "../standard-test-data");
