@@ -41,26 +41,24 @@ describe("json-parser", () => {
     const fileNames = fs.readdirSync(standardTestsDir);
 
     it("has files", () => {
-      console.log("found files", fileNames);
-      expect(fileNames.length).toBeGreaterThan(0);
+      expect(fileNames.length).toBeGreaterThan(10);
     });
 
     fileNames.forEach((fileName) => {
       const filePath = path.join(standardTestsDir, fileName);
       const fileContents = fs.readFileSync(filePath, "utf8");
-      // if (fileName === "fail18.json") {
-      //   // JSON array depth is subjective and can be set by the parser, so ignoring this test, we assume our parser allows as much as the system allows
-      //   // https://stackoverflow.com/questions/42116718/is-there-an-array-depth-limitation-in-json
-      //   return;
-      // }
-
       if (fileName.startsWith("fail")) {
-        it(`can fail to parse file "${fileName}": ${fileContents}`, () => {
-          expect(() => parseJSON(fileContents)).toThrow();
+        it(`fails to parse file "${fileName}"`, () => {
+          expect(
+            () => parseJSON(fileContents),
+            `fails to parse file "${fileName}": ${fileContents}`,
+          ).toThrow();
         });
       } else {
-        it(`can parse file "${fileName}": ${fileContents}`, () => {
-          expect(parseJSON(fileContents)).toEqual(JSON.parse(fileContents));
+        it(`can parse file "${fileName}"`, () => {
+          expect(parseJSON(fileContents), `can parse file "${fileName}": ${fileContents}`).toEqual(
+            JSON.parse(fileContents),
+          );
         });
       }
     });
