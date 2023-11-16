@@ -48,6 +48,11 @@ describe("json-parser", () => {
     fileNames.forEach((fileName) => {
       const filePath = path.join(standardTestsDir, fileName);
       const fileContents = fs.readFileSync(filePath, "utf8");
+      // if (fileName === "fail18.json") {
+      //   // JSON array depth is subjective and can be set by the parser, so ignoring this test, we assume our parser allows as much as the system allows
+      //   // https://stackoverflow.com/questions/42116718/is-there-an-array-depth-limitation-in-json
+      //   return;
+      // }
 
       if (fileName.startsWith("fail")) {
         it(`can fail to parse file "${fileName}": ${fileContents}`, () => {

@@ -1,8 +1,14 @@
 export default function parseJSON(json: string): any {
   console.log("parseJSON with unicode translated", json);
   const tokenIterator = createTokenIterator(json);
-  debugger;
-  return parseTokens(tokenIterator);
+  const value = parseTokens(tokenIterator);
+  if (!tokenIterator.next().done) {
+    throw new Error(`Unexpected tokens after end of value`);
+  }
+  if (!value || (typeof value !== "object" && !Array.isArray(value))) {
+    throw new Error(`Expected overall object or array but got: "${value}"`);
+  }
+  return value;
 }
 
 const SpecialTokenSymbol = Symbol("SpecialToken");
@@ -18,10 +24,10 @@ type Token =
   | null;
 
 type SpecialToken = "{" | "}" | "[" | "]" | ":" | ",";
-
 type TokenIterator = Generator<Token, void, unknown>;
 type TokenItem = IteratorResult<Token, void>;
 
+// todo have these as strings and use `#contains`? is that faster?
 const SPECIAL_CHARACTER_TOKENS = new Set(["{", "}", "[", "]", ":", ","]);
 const IRRELEVANT_TOKENS = new Set([" ", "\n", "\t"]); // ignore white space
 
@@ -55,14 +61,23 @@ function* createTokenIterator(json: string): TokenIterator {
 
       // parse string
       while (json[++i] !== '"') {
-        // handle new lines in strings
+        // handle new lines
         if (json[i] === "\n") {
           throw new Error(`Unexpected new line in string`);
+        }
+
+        // handle tabs
+        if (json[i] === "\t") {
+          throw new Error(`Unexpected tab in string`);
         }
 
         // handle escape characters
         if (json[i] === "\\") {
           i++; // current char is the escape character, so we skip it
+
+          if ("x0 \n".includes(json[i])) {
+            throw new Error(`Illegal escape character: ${json[i]}`);
+          }
 
           // handle unicode escape characters
           if (json[i] === "u") {
@@ -235,12 +250,15 @@ function parseObjectBody(tokenIterator: TokenIterator): Record<string, Token> {
     if (isSpecialTokenWithValue(commaTokenItem.value, "}")) {
       break; // end of object
     }
-    if (!isSpecialTokenWithValue(commaTokenItem.value, ",")) {
-      throw new Error(`Expected "," but got: "${JSON.stringify(commaTokenItem.value)}"`);
+    if (isSpecialTokenWithValue(commaTokenItem.value, ",")) {
+      // get next property key token
+      keyTokenItem = tokenIterator.next();
+      if (isSpecialTokenWithValue(keyTokenItem.value, "}")) {
+        throw new Error(`Unexpected trailing comma in object`);
+      }
+      continue;
     }
-
-    // get next property key token
-    keyTokenItem = tokenIterator.next();
+    throw new Error(`Expected "," or "}" but got: "${JSON.stringify(commaTokenItem.value)}"`);
   }
   return properties;
 }
@@ -266,6 +284,9 @@ function parseArrayBody(tokenIterator: TokenIterator): Token[] {
     }
     if (isSpecialTokenWithValue(tokenItem.value, ",")) {
       tokenItem = tokenIterator.next(); // get next value
+      if (isSpecialTokenWithValue(tokenItem.value, "]")) {
+        throw new Error(`Unexpected trailing comma in array`);
+      }
       continue;
     }
     throw new Error(`Expected "," or "]" but got: "${JSON.stringify(tokenItem.value)}"`);
