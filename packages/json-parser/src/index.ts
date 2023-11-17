@@ -37,7 +37,7 @@ const NUMBERS = "0123456789";
  * 0.123456789e-12 // scientific notation
  * 1.234567890E+34 // scientific notation
  */
-const NUMBER_VALUE_TOKENS = "0123456789.eE-+";
+const NUMBER_VALUE_TOKENS = NUMBERS + ".eE-+";
 
 // NOTE: using a generator so we can lazy parse the string and if there is an issue we can stop early
 function* createTokenIterator(text: string): TokenIterator {
